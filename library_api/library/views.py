@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from rest_framework import status, viewsets
+from rest_framework import status, viewsets, filters
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
@@ -43,6 +43,8 @@ class LoginView(APIView):
 class BookViewSet(viewsets.ModelViewSet):
     queryset = Book.objects.all()
     serializer_class = BookSerializer
+    filter_backends = [filters.SearchFilter] #add book search
+    search_fields = ['title', 'author', 'isbn']
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
@@ -54,8 +56,17 @@ class BookViewSet(viewsets.ModelViewSet):
 def checkout_book(request, book_id):
     try:
         book = Book.objects.get(id=book_id)
+        
         if not book.is_available:
-            return Response({'error': 'Book not available'}, status=400)
+            return Response({'error': 'Book is not available'}, status=400)
+        
+        # Prevent multiple checkouts of the same book by the same user
+        already_checked_out = Transaction.objects.filter(
+            user=request.user, book=book, return_date__isnull=True
+        ).exists()
+
+        if already_checked_out:
+            return Response({'error': 'You have already checked out this book'}, status=400)
 
         book.is_available = False
         book.save()
@@ -75,7 +86,7 @@ def return_book(request, book_id):
         transaction = Transaction.objects.filter(user=request.user, book=book, return_date__isnull=True).first()
 
         if not transaction:
-            return Response({'error': 'No active transaction found for this book'}, status=400)
+            return Response({'error': 'You do not have this book checked out'}, status=400)
 
         book.is_available = True
         book.save()
